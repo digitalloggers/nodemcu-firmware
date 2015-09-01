@@ -10,6 +10,7 @@
 // #define LUA_USE_BUILTIN_OS			// for os.xxx(), not work
 // #define LUA_USE_BUILTIN_DEBUG		// for debug.xxx(), not work
 
+#ifndef LUA_CROSS_COMPILER
 #define LUA_USE_MODULES
 
 #ifdef LUA_USE_MODULES
@@ -41,5 +42,6 @@
 // #define LUA_USE_MODULES_SNTP
 
 #endif /* LUA_USE_MODULES */
+#endif
 
 #endif	/* __USER_MODULES_H__ */
