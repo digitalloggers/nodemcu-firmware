@@ -1378,6 +1378,7 @@ static const LUA_REG_TYPE wifi_ap_dhcp_map[] =
 
 static const LUA_REG_TYPE wifi_ap_map[] =
 {
+  { LSTRKEY( "getconfig" ), LFUNCVAL( wifi_ap_getconfig ) },
   { LSTRKEY( "config" ), LFUNCVAL( wifi_ap_config ) },
   { LSTRKEY( "getip" ), LFUNCVAL ( wifi_ap_getip ) },
   { LSTRKEY( "setip" ), LFUNCVAL ( wifi_ap_setip ) },
