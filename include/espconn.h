@@ -1,7 +1,8 @@
 #ifndef __ESPCONN_H__
 #define __ESPCONN_H__
 
-#include "lwip/ip_addr.h"
+#include "c_types.h"
+#include "ip_addr.h"
 
 typedef sint8 err_t;
 

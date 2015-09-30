@@ -57,7 +57,13 @@ struct ip_info {
 #define IPADDR_NONE         ((uint32)0xffffffffUL)
 /** 0.0.0.0 */
 #define IPADDR_ANY          ((uint32)0x00000000UL)
+#define ip_addr_isany(addr1) ((addr1) == NULL || (addr1)->addr == IPADDR_ANY)
 uint32 ipaddr_addr(const char *cp);
+
+/** IPv4 only: set the IP address given as an u32_t */
+#define ip4_addr_set_u32(dest_ipaddr, src_u32) ((dest_ipaddr)->addr = (src_u32))
+/** IPv4 only: get the IP address as an u32_t */
+#define ip4_addr_get_u32(src_ipaddr) ((src_ipaddr)->addr)
 
 #define IP2STR(ipaddr) ip4_addr1_16(ipaddr), \
     ip4_addr2_16(ipaddr), \
