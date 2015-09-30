@@ -13,6 +13,7 @@
 #include "c_string.h"
 #include "c_stdlib.h"
 #include "c_stdio.h"
+#include "c_types.h"
 
 #include "flash_fs.h"
 #include "user_interface.h"
@@ -21,6 +22,9 @@
 #include "ets_sys.h"
 #include "driver/uart.h"
 #include "mem.h"
+
+#define TEXT_SECTION_ATTR __attribute__((section(".text")))
+#define RAM_CONST_ATTR __attribute__((section(".text")))
 
 #define SIG_LUA 0
 #define TASK_QUEUE_LEN 4
