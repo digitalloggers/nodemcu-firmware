@@ -10,6 +10,7 @@
  *     2014/3/12, v1.0 create this file.
 *******************************************************************************/
 #include "ets_sys.h"
+#include "eagle_soc.h"
 #include "osapi.h"
 #include "driver/uart.h"
 #include "user_config.h"
