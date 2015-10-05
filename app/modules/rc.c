@@ -20,7 +20,6 @@ static int ICACHE_FLASH_ATTR rc_send(lua_State* L) {
   const uint8_t pin = luaL_checkinteger(L, 1);
   platform_gpio_mode(pin, PLATFORM_GPIO_OUTPUT, PLATFORM_GPIO_FLOAT);
   //platform_gpio_mode(pin, PLATFORM_GPIO_OUTPUT, PLATFORM_GPIO_PULLUP);
-  //platform_gpio_mode(pin, PLATFORM_GPIO_OUTPUT, PLATFORM_GPIO_PULLDOWN);
   platform_gpio_write(pin, 0);
   long code = luaL_checklong(L, 2);
   //const uint8_t bits = luaL_checkinteger(L, 3);
