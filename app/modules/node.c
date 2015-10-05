@@ -25,6 +25,9 @@
 #include "flash_fs.h"
 #include "user_version.h"
 
+/* XXX */
+#define os_update_cpu_frequency ets_update_cpu_frequency
+
 #define CPU80MHZ 80
 #define CPU160MHZ 160
 

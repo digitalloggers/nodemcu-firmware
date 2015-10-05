@@ -15,6 +15,10 @@
 #include "espconn.h"
 #include "lwip/dns.h" 
 
+/* XXX: from lwip/ip_addr.h */
+#define ip4_addr_set_u32(dest_ipaddr, src_u32) ((dest_ipaddr)->addr = (src_u32))
+#define ip_addr_isany(addr1) ((addr1) == NULL || (addr1)->addr == IPADDR_ANY)
+
 #ifdef CLIENT_SSL_ENABLE
 unsigned char *default_certificate;
 unsigned int default_certificate_len = 0;

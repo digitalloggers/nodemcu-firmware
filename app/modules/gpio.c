@@ -10,6 +10,9 @@
 #include "c_types.h"
 #include "c_string.h"
 
+#define os_intr_lock ets_intr_lock
+#define os_intr_unlock ets_intr_unlock
+
 #define PULLUP PLATFORM_GPIO_PULLUP
 #define FLOAT PLATFORM_GPIO_FLOAT
 #define OUTPUT PLATFORM_GPIO_OUTPUT

@@ -15,6 +15,9 @@
 #include "smart.h"
 #include "smartconfig.h"
 
+/* XXX */
+#define os_str2macaddr ets_str2macaddr
+
 static int wifi_smart_succeed = LUA_NOREF;
 static uint8 getap_output_format=0;
 
