@@ -2,11 +2,11 @@
 #define __USER_VERSION_H__
 
 #define NODE_VERSION_MAJOR		1U
-#define NODE_VERSION_MINOR		1U
-#define NODE_VERSION_REVISION	2U
+#define NODE_VERSION_MINOR		2U
+#define NODE_VERSION_REVISION	0U
 #define NODE_VERSION_INTERNAL   0U
 
 #define NODE_VERSION	"NodeMCU 1.2.0"
-#define BUILD_DATE	    "build 20150714"
+#define BUILD_DATE	    ""
 
 #endif	/* __USER_VERSION_H__ */
