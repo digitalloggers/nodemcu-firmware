@@ -195,11 +195,11 @@ typedef TValuefields TValue;
   ((ttype(obj) == (obj)->value.gc->gch.tt) && !isdead(g, (obj)->value.gc)))
 #else // #ifndef LUA_PACK_VALUE
 #define checkconsistency(obj) \
-  lua_assert(!iscollectable(obj) || (ttype(obj) == (obj)->value.gc->gch._t.tt))
+  lua_assert(!iscollectable(obj) || (ttype(obj) == (obj)->value.gc->gch.tt))
 
 #define checkliveness(g,obj) \
   lua_assert(!iscollectable(obj) || \
-  ((ttype(obj) == (obj)->value.gc->gch._t.tt) && !isdead(g, (obj)->value.gc)))
+  ((ttype(obj) == (obj)->value.gc->gch.tt) && !isdead(g, (obj)->value.gc)))
 #endif // #ifndef LUA_PACK_VALUE
 
 /* Macros to set values */
