@@ -103,6 +103,19 @@ OIMAGES := $(GEN_IMAGES:%=$(IMAGEODIR)/%)
 BINODIR := $(ODIR)/$(TARGET)/$(FLAVOR)/bin
 OBINS := $(GEN_BINS:%=$(BINODIR)/%)
 
+
+LDFLAGS += 					\
+	-Wl,--defsym=memcmp=ets_memcmp		\
+	-Wl,--defsym=memcpy=ets_memcpy		\
+	-Wl,--defsym=memmove=ets_memmove	\
+	-Wl,--defsym=memset=ets_memset		\
+	-Wl,--defsym=strcmp=ets_strcmp		\
+	-Wl,--defsym=strcpy=ets_strcpy		\
+	-Wl,--defsym=strlen=ets_strlen		\
+	-Wl,--defsym=strncmp=ets_strncmp	\
+	-Wl,--defsym=strncpy=ets_strncpy	\
+	-Wl,--defsym=strstr=ets_strstr		\
+
 #
 # Note: 
 # https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html
