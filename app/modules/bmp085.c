@@ -1,8 +1,6 @@
-#include "lualib.h"
+#include "module.h"
 #include "lauxlib.h"
 #include "platform.h"
-#include "auxmods.h"
-#include "lrotable.h"
 #include "c_stdlib.h"
 #include "c_string.h"
 
@@ -76,7 +74,7 @@ static int ICACHE_FLASH_ATTR bmp085_init(lua_State* L) {
     bmp085_data.MC  = r16(bmp085_i2c_id, 0xBC);
     bmp085_data.MD  = r16(bmp085_i2c_id, 0xBE);
 
-    return 1;
+    return 0;
 }
 
 static uint32_t bmp085_temperature_raw_b5(void) {
@@ -130,7 +128,7 @@ static int32_t ICACHE_FLASH_ATTR bmp085_pressure_raw(int oss) {
     p3 = r8u(bmp085_i2c_id, 0xF8);
     p = (p1 << 16) | (p2 << 8) | p3;
     p = p >> (8 - oss);
- 
+
     return p;
 }
 
@@ -161,7 +159,7 @@ static int ICACHE_FLASH_ATTR bmp085_lua_pressure(lua_State* L) {
             oss = 3;
         }
     }
- 
+
     p = bmp085_pressure_raw(oss);
     B5 = bmp085_temperature_raw_b5();
 
@@ -185,19 +183,12 @@ static int ICACHE_FLASH_ATTR bmp085_lua_pressure(lua_State* L) {
     return 1;
 }
 
-#define MIN_OPT_LEVEL 2
-#include "lrodefs.h"
-const LUA_REG_TYPE bmp085_map[] =
-{
-    { LSTRKEY( "temperature" ), LFUNCVAL( bmp085_lua_temperature )},
-    { LSTRKEY( "pressure" ), LFUNCVAL( bmp085_lua_pressure )},
+static const LUA_REG_TYPE bmp085_map[] = {
+    { LSTRKEY( "temperature" ),  LFUNCVAL( bmp085_lua_temperature )},
+    { LSTRKEY( "pressure" ),     LFUNCVAL( bmp085_lua_pressure )},
     { LSTRKEY( "pressure_raw" ), LFUNCVAL( bmp085_lua_pressure_raw )},
-    { LSTRKEY( "init" ), LFUNCVAL( bmp085_init )},
+    { LSTRKEY( "init" ),         LFUNCVAL( bmp085_init )},
     { LNILKEY, LNILVAL}
 };
 
-LUALIB_API int luaopen_bmp085(lua_State *L) {
-    LREGISTER(L, "bmp085", bmp085_map);
-    return 1;
-}
-
+NODEMCU_MODULE(BMP085, "bmp085", bmp085_map, NULL);

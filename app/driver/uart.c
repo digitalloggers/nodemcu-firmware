@@ -12,8 +12,10 @@
 #include "ets_sys.h"
 #include "osapi.h"
 #include "driver/uart.h"
+#include "task/task.h"
 #include "user_config.h"
 #include "user_interface.h"
+#include "osapi.h"
 
 #define UART0   0
 #define UART1   1
@@ -21,13 +23,18 @@
 #ifndef FUNC_U0RXD
 #define FUNC_U0RXD 0
 #endif
+#ifndef FUNC_U0CTS
+#define FUNC_U0CTS                      4
+#endif
+
 
 // For event signalling
-static uint8 task = USER_TASK_PRIO_MAX;
-static os_signal_t sig;
+static task_handle_t sig = 0;
 
 // UartDev is defined and initialized in rom code.
 extern UartDevice UartDev;
+
+static os_timer_t autobaud_timer;
 
 LOCAL void ICACHE_RAM_ATTR
 uart0_rx_intr_handler(void *para);
@@ -56,10 +63,10 @@ uart_config(uint8 uart_no)
 
     uart_div_modify(uart_no, UART_CLK_FREQ / (UartDev.baut_rate));
 
-    WRITE_PERI_REG(UART_CONF0(uart_no),    UartDev.exist_parity
-                   | UartDev.parity
-                   | (UartDev.stop_bits << UART_STOP_BIT_NUM_S)
-                   | (UartDev.data_bits << UART_BIT_NUM_S));
+    WRITE_PERI_REG(UART_CONF0(uart_no), ((UartDev.exist_parity & UART_PARITY_EN_M)  <<  UART_PARITY_EN_S) //SET BIT AND PARITY MODE
+                   | ((UartDev.parity & UART_PARITY_M)  <<UART_PARITY_S )
+                   | ((UartDev.stop_bits & UART_STOP_BIT_NUM) << UART_STOP_BIT_NUM_S)
+                   | ((UartDev.data_bits & UART_BIT_NUM) << UART_BIT_NUM_S));
 
 
     //clear rx and tx fifo,not ready
@@ -74,6 +81,39 @@ uart_config(uint8 uart_no)
     //enable rx_interrupt
     SET_PERI_REG_MASK(UART_INT_ENA(uart_no), UART_RXFIFO_FULL_INT_ENA);
 }
+
+
+
+/******************************************************************************
+ * FunctionName : uart0_alt
+ * Description  : Internal used function
+ *                UART0 pins changed to 13,15 if 'on' is set, else set to normal pins
+ * Parameters   : on - 1 = use alternate pins, 0 = use normal pins
+ * Returns      : NONE
+*******************************************************************************/
+void ICACHE_FLASH_ATTR
+uart0_alt(uint8 on)
+{
+    if (on)
+    {
+        PIN_PULLUP_DIS(PERIPHS_IO_MUX_MTDO_U);
+        PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDO_U, FUNC_U0RTS);
+        PIN_PULLUP_EN(PERIPHS_IO_MUX_MTCK_U);
+        PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTCK_U, FUNC_U0CTS);
+        // now make RTS/CTS behave as TX/RX
+        IOSWAP |= (1 << IOSWAPU0);
+    }
+    else
+    {
+        PIN_PULLUP_DIS(PERIPHS_IO_MUX_U0TXD_U);
+        PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0TXD_U, FUNC_U0TXD);
+        PIN_PULLUP_EN(PERIPHS_IO_MUX_U0RXD_U);
+        PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0RXD_U, FUNC_U0RXD);
+        // now make RX/TX behave as TX/RX
+        IOSWAP &= ~(1 << IOSWAPU0);
+    }
+}
+
 
 /******************************************************************************
  * FunctionName : uart_tx_one_char
@@ -211,7 +251,7 @@ uart0_rx_intr_handler(void *para)
         if (RcvChar == '\r' || RcvChar == '\n' ) {
             pRxBuff->BuffState = WRITE_OVER;
         }
-        
+
         if (pRxBuff->pWritePos == (pRxBuff->pRcvMsgBuff + RX_BUFF_SIZE)) {
             // overflow ...we may need more error handle here.
             pRxBuff->pWritePos = pRxBuff->pRcvMsgBuff ;
@@ -221,7 +261,7 @@ uart0_rx_intr_handler(void *para)
 
         if (pRxBuff->pWritePos == pRxBuff->pReadPos){   // overflow one byte, need push pReadPos one byte ahead
             if (pRxBuff->pReadPos == (pRxBuff->pRcvMsgBuff + RX_BUFF_SIZE)) {
-                pRxBuff->pReadPos = pRxBuff->pRcvMsgBuff ; 
+                pRxBuff->pReadPos = pRxBuff->pRcvMsgBuff ;
             } else {
                 pRxBuff->pReadPos++;
             }
@@ -230,8 +270,38 @@ uart0_rx_intr_handler(void *para)
         got_input = true;
     }
 
-    if (got_input && task != USER_TASK_PRIO_MAX)
-      system_os_post (task, sig, UART0);
+    if (got_input && sig)
+      task_post_low (sig, false);
+}
+
+static void 
+uart_autobaud_timeout(void *timer_arg)
+{
+  uint32_t uart_no = (uint32_t) timer_arg;
+  uint32_t divisor = uart_baudrate_detect(uart_no, 1);
+  static int called_count = 0;
+
+  // Shut off after two minutes to stop wasting CPU cycles if insufficient input received
+  if (called_count++ > 10 * 60 * 2 || divisor) {
+    os_timer_disarm(&autobaud_timer);
+  }
+
+  if (divisor) {
+    uart_div_modify(uart_no, divisor);
+  }
+}
+
+static void 
+uart_init_autobaud(uint32_t uart_no)
+{
+  os_timer_setfn(&autobaud_timer, uart_autobaud_timeout, (void *) uart_no);
+  os_timer_arm(&autobaud_timer, 100, TRUE);
+}
+
+static void 
+uart_stop_autobaud()
+{
+  os_timer_disarm(&autobaud_timer);
 }
 
 /******************************************************************************
@@ -244,9 +314,8 @@ uart0_rx_intr_handler(void *para)
  * Returns      : NONE
 *******************************************************************************/
 void ICACHE_FLASH_ATTR
-uart_init(UartBautRate uart0_br, UartBautRate uart1_br, uint8 task_prio, os_signal_t sig_input)
+uart_init(UartBautRate uart0_br, UartBautRate uart1_br, os_signal_t sig_input)
 {
-    task = task_prio;
     sig = sig_input;
 
     // rom use 74880 baut_rate, here reinitialize
@@ -255,16 +324,17 @@ uart_init(UartBautRate uart0_br, UartBautRate uart1_br, uint8 task_prio, os_sign
     UartDev.baut_rate = uart1_br;
     uart_config(UART1);
     ETS_UART_INTR_ENABLE();
-
-    // install uart1 putc callback
-#ifndef NODE_DEBUG
-    os_install_putc1((void *)uart1_write_char);
+#ifdef BIT_RATE_AUTOBAUD
+    uart_init_autobaud(0);
 #endif
 }
 
 void ICACHE_FLASH_ATTR
 uart_setup(uint8 uart_no)
 {
+#ifdef BIT_RATE_AUTOBAUD
+    uart_stop_autobaud();
+#endif
     ETS_UART_INTR_DISABLE();
     uart_config(uart_no);
     ETS_UART_INTR_ENABLE();

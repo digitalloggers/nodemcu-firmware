@@ -1,9 +1,6 @@
 #  copyright (c) 2010 Espressif System
 #
 .NOTPARALLEL:
-ifndef PDIR
-
-endif
 
 # Ensure we search "our" SDK before the tool-chain's SDK (if any)
 TOP_DIR:=$(dir $(lastword $(MAKEFILE_LIST)))
@@ -133,8 +130,8 @@ DEFINES +=			\
 	-DELUA_ENDIAN_LITTLE=1	\
 	-DLUA_PACK_VALUE=1	\
 
-CFLAGS = $(CCFLAGS) $(DEFINES) $(EXTRA_CCFLAGS) $(INCLUDES)
-DFLAGS = $(CCFLAGS) $(DDEFINES) $(EXTRA_CCFLAGS) $(INCLUDES)
+CFLAGS = $(CCFLAGS) $(DEFINES) $(EXTRA_CCFLAGS) $(STD_CFLAGS) $(INCLUDES)
+DFLAGS = $(CCFLAGS) $(DDEFINES) $(EXTRA_CCFLAGS) $(STD_CFLAGS) $(INCLUDES)
 
 
 #############################################################
@@ -173,7 +170,7 @@ $(BINODIR)/%.bin: $(IMAGEODIR)/%.out
 # Should be done in top-level makefile only
 #
 
-all:	.subdirs $(OBJS) $(OLIBS) $(OIMAGES) $(OBINS) $(SPECIAL_MKTARGETS)
+all:	pre_build .subdirs $(OBJS) $(OLIBS) $(OIMAGES) $(OBINS) $(SPECIAL_MKTARGETS)
 
 clean:
 	$(foreach d, $(SUBDIRS), $(MAKE) -C $(d) clean;)
@@ -203,6 +200,18 @@ sinclude $(DEPS)
 endif
 endif
 endif
+
+.PHONY: pre_build
+
+ifneq ($(wildcard $(TOP_DIR)/server-ca.crt),)
+pre_build:
+	python $(TOP_DIR)/tools/make_server_cert.py $(TOP_DIR)/server-ca.crt > $(TOP_DIR)/app/modules/server-ca.crt.h
+DEFINES += -DHAVE_SSL_SERVER_CRT=\"server-ca.crt.h\"
+else
+pre_build:
+	@-rm -f $(TOP_DIR)/app/modules/server-ca.crt.h
+endif
+
 
 $(OBJODIR)/%.o: %.c
 	@mkdir -p $(OBJODIR);

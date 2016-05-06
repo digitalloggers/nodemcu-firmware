@@ -1,11 +1,9 @@
 // Module for network
 
-//#include "lua.h"
-#include "lualib.h"
+#include "module.h"
 #include "lauxlib.h"
 #include "platform.h"
-#include "auxmods.h"
-#include "lrotable.h"
+#include "lmem.h"
 
 #include "c_string.h"
 #include "c_stdlib.h"
@@ -16,17 +14,18 @@
 #include "espconn.h"
 #include "lwip/dns.h" 
 
-#ifdef CLIENT_SSL_ENABLE
-unsigned char *default_certificate;
-unsigned int default_certificate_len = 0;
-unsigned char *default_private_key;
-unsigned int default_private_key_len = 0;
-#endif
-
 #define TCP ESPCONN_TCP
 #define UDP ESPCONN_UDP
 
 static ip_addr_t host_ip; // for dns
+
+#ifdef HAVE_SSL_SERVER_CRT
+#include HAVE_SSL_SERVER_CRT
+#else
+__attribute__((section(".servercert.flash"))) unsigned char net_server_cert_area[INTERNAL_FLASH_SECTOR_SIZE];
+#endif
+
+__attribute__((section(".clientcert.flash"))) unsigned char net_client_cert_area[INTERNAL_FLASH_SECTOR_SIZE];
 
 #if 0
 static int expose_array(lua_State* L, char *array, unsigned short len);
@@ -215,7 +214,7 @@ static void net_dns_found(const char *name, ip_addr_t *ipaddr, void *arg)
   // ipaddr->addr is a uint32_t ip
   char ip_str[20];
   c_memset(ip_str, 0, sizeof(ip_str));
-  if(host_ip.addr == 0 && ipaddr->addr != 0)
+  if(ipaddr->addr != 0)
   {
     c_sprintf(ip_str, IPSTR, IP2STR(&(ipaddr->addr)));
   }
@@ -238,7 +237,7 @@ static void net_dns_found(const char *name, ip_addr_t *ipaddr, void *arg)
     // ipaddr->addr is a uint32_t ip
     char ip_str[20];
     c_memset(ip_str, 0, sizeof(ip_str));
-    if(host_ip.addr == 0 && ipaddr->addr != 0)
+    if(ipaddr->addr != 0)
     {
       c_sprintf(ip_str, IPSTR, IP2STR(&(ipaddr->addr)));
     }
@@ -597,6 +596,7 @@ static void socket_connect(struct espconn *pesp_conn)
   {
 #ifdef CLIENT_SSL_ENABLE
     if(nud->secure){
+      espconn_secure_set_size(ESPCONN_CLIENT, 5120); /* set SSL buffer size */
       espconn_secure_connect(pesp_conn);
     }
     else
@@ -613,7 +613,7 @@ static void socket_connect(struct espconn *pesp_conn)
 }
 
 static void socket_dns_found(const char *name, ip_addr_t *ipaddr, void *arg);
-static dns_reconn_count = 0;
+static int dns_reconn_count = 0;
 static void socket_dns_found(const char *name, ip_addr_t *ipaddr, void *arg)
 {
   NODE_DBG("socket_dns_found is called.\n");
@@ -1148,7 +1148,9 @@ static int net_dns( lua_State* L, const char* mt )
   }
 
   host_ip.addr = 0;
-  espconn_gethostbyname(pesp_conn, domain, &host_ip, net_dns_found);
+  if(ESPCONN_OK == espconn_gethostbyname(pesp_conn, domain, &host_ip, net_dns_found))
+    net_dns_found(domain, &host_ip, pesp_conn);  // ip is returned in host_ip.
+
 
   return 0;  
 }
@@ -1213,7 +1215,9 @@ static int net_dns_static( lua_State* L )
   }
 
   host_ip.addr = 0;
-  espconn_gethostbyname(pesp_conn, domain, &host_ip, net_dns_found);
+  if(ESPCONN_OK == espconn_gethostbyname(pesp_conn, domain, &host_ip, net_dns_found))
+    net_dns_found(domain, &host_ip, pesp_conn);  // ip is returned in host_ip.
+
 
   return 0;
 }
@@ -1430,6 +1434,201 @@ static int net_multicastLeave( lua_State* L )
 	return net_multicastJoinLeave(L,0);
 }
 
+// Returns NULL on success, error message otherwise
+static const char *append_pem_blob(const char *pem, const char *type, uint8_t **buffer_p, uint8_t *buffer_limit, const char *name) {
+  char unb64[256];
+  memset(unb64, 0xff, sizeof(unb64));
+  int i;
+  for (i = 0; i < 64; i++) {
+    unb64["ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[i]] = i;
+  }
+
+  if (!pem) {
+    return "No PEM blob";
+  }
+
+  // Scan for -----BEGIN CERT
+  pem = strstr(pem, "-----BEGIN ");
+  if (!pem) {
+    return "No PEM header";
+  }
+
+  if (strncmp(pem + 11, type, strlen(type))) {
+    return "Wrong PEM type";
+  }
+
+  pem = strchr(pem, '\n');
+  if (!pem) {
+    return "Incorrect PEM format";
+  }
+  //
+  // Base64 encoded data starts here
+  // Get all the base64 data into a single buffer....
+  // We will use the back end of the buffer....
+  //
+
+  uint8_t *buffer = *buffer_p;
+
+  uint8_t *dest = buffer + 32 + 2;  // Leave space for name and length
+  int bitcount = 0;
+  int accumulator = 0;
+  for (; *pem && dest < buffer_limit; pem++) {
+    int val = unb64[*(uint8_t*) pem];
+    if (val & 0xC0) {
+      // not a base64 character
+      if (isspace(*(uint8_t*) pem)) {
+	continue;
+      }
+      if (*pem == '=') {
+	// just ignore -- at the end
+	bitcount = 0;
+	continue;
+      }
+      if (*pem == '-') {
+	break;
+      }
+      return "Invalid character in PEM";
+    } else {
+      bitcount += 6;
+      accumulator = (accumulator << 6) + val;
+      if (bitcount >= 8) {
+	bitcount -= 8;
+	*dest++ = accumulator >> bitcount;
+      }
+    }
+  }
+  if (dest >= buffer_limit || strncmp(pem, "-----END ", 9) || strncmp(pem + 9, type, strlen(type)) || bitcount) {
+    return "Invalid PEM format data";
+  }
+  size_t len = dest - (buffer + 32 + 2);
+
+  memset(buffer, 0, 32);
+  strcpy(buffer, name);
+  buffer[32] = len & 0xff;
+  buffer[33] = (len >> 8) & 0xff;
+  *buffer_p = dest;
+  return NULL;
+}
+
+static const char *fill_page_with_pem(lua_State *L, const unsigned char *flash_memory, int flash_offset, const char **types, const char **names) 
+{
+  uint8_t  *buffer = luaM_malloc(L, INTERNAL_FLASH_SECTOR_SIZE);
+  uint8_t  *buffer_base = buffer;
+  uint8_t  *buffer_limit = buffer + INTERNAL_FLASH_SECTOR_SIZE;
+
+  int argno;
+
+  for (argno = 1; argno <= lua_gettop(L) && types[argno - 1]; argno++) {
+    const char *pem = lua_tostring(L, argno);
+
+    const char *error = append_pem_blob(pem, types[argno - 1], &buffer, buffer_limit, names[argno - 1]);
+    if (error) {
+      luaM_free(L, buffer_base);
+      return error;
+    }
+  }
+
+  memset(buffer, 0xff, buffer_limit - buffer);
+
+  // Lets see if it matches what is already there....
+  if (c_memcmp(buffer_base, flash_memory, INTERNAL_FLASH_SECTOR_SIZE) != 0) {
+    // Starts being dangerous
+    if (platform_flash_erase_sector(flash_offset / INTERNAL_FLASH_SECTOR_SIZE) != PLATFORM_OK) {
+      luaM_free(L, buffer_base);
+      return "Failed to erase sector";
+    }
+    if (platform_s_flash_write(buffer_base, flash_offset, INTERNAL_FLASH_SECTOR_SIZE) != INTERNAL_FLASH_SECTOR_SIZE) {
+      luaM_free(L, buffer_base);
+      return "Failed to write sector";
+    }
+    // ends being dangerous
+  }
+
+  luaM_free(L, buffer_base);
+
+  return NULL;
+}
+
+// Lua: net.cert.auth(true / false | PEM data [, PEM data] )
+static int net_cert_auth(lua_State *L)
+{
+  int enable;
+
+  uint32_t flash_offset = platform_flash_mapped2phys((uint32_t) &net_client_cert_area[0]);
+  if ((flash_offset & 0xfff) || flash_offset > 0xff000 || INTERNAL_FLASH_SECTOR_SIZE != 0x1000) {
+    // THis should never happen
+    return luaL_error( L, "bad offset" );
+  }
+
+  if (lua_type(L, 1) == LUA_TSTRING) {
+    const char *types[3] = { "CERTIFICATE", "RSA PRIVATE KEY", NULL };
+    const char *names[2] = { "certificate", "private_key" };
+    const char *error = fill_page_with_pem(L, &net_client_cert_area[0], flash_offset, types, names);
+    if (error) {
+      return luaL_error(L, error);
+    }
+
+    enable = 1;
+  } else {
+    enable = lua_toboolean(L, 1);
+  }
+
+  bool rc;
+
+  if (enable) {
+    // See if there is a cert there
+    if (net_client_cert_area[0] == 0x00 || net_client_cert_area[0] == 0xff) {
+      return luaL_error( L, "no certificates found" );
+    }
+    rc = espconn_secure_cert_req_enable(1, flash_offset / INTERNAL_FLASH_SECTOR_SIZE);
+  } else {
+    rc = espconn_secure_cert_req_disable(1);
+  }
+
+  lua_pushboolean(L, rc);
+  return 1;
+}
+
+// Lua: net.cert.verify(true / false | PEM data [, PEM data] )
+static int net_cert_verify(lua_State *L)
+{
+  int enable;
+
+  uint32_t flash_offset = platform_flash_mapped2phys((uint32_t) &net_server_cert_area[0]);
+  if ((flash_offset & 0xfff) || flash_offset > 0xff000 || INTERNAL_FLASH_SECTOR_SIZE != 0x1000) {
+    // THis should never happen
+    return luaL_error( L, "bad offset" );
+  }
+
+  if (lua_type(L, 1) == LUA_TSTRING) {
+    const char *types[2] = { "CERTIFICATE", NULL };
+    const char *names[1] = { "certificate" };
+
+    const char *error = fill_page_with_pem(L, &net_server_cert_area[0], flash_offset, types, names);
+    if (error) {
+      return luaL_error(L, error);
+    }
+
+    enable = 1;
+  } else {
+    enable = lua_toboolean(L, 1);
+  }
+
+  bool rc;
+
+  if (enable) {
+    // See if there is a cert there
+    if (net_server_cert_area[0] == 0x00 || net_server_cert_area[0] == 0xff) {
+      return luaL_error( L, "no certificates found" );
+    }
+    rc = espconn_secure_ca_enable(1, flash_offset / INTERNAL_FLASH_SECTOR_SIZE);
+  } else {
+    rc = espconn_secure_ca_disable(1);
+  }
+
+  lua_pushboolean(L, rc);
+  return 1;
+}
 
 // Lua: s = net.dns.setdnsserver(ip_addr, [index])
 static int net_setdnsserver( lua_State* L )
@@ -1504,132 +1703,83 @@ static int expose_array(lua_State* L, char *array, unsigned short len) {
 #endif
 
 // Module function map
-#define MIN_OPT_LEVEL 2
-#include "lrodefs.h"
-static const LUA_REG_TYPE net_server_map[] =
-{
-  { LSTRKEY( "listen" ), LFUNCVAL ( net_server_listen ) },
-  { LSTRKEY( "close" ), LFUNCVAL ( net_server_close ) },
-  { LSTRKEY( "on" ), LFUNCVAL ( net_udpserver_on ) },
-  { LSTRKEY( "send" ), LFUNCVAL ( net_udpserver_send ) },
-  // { LSTRKEY( "delete" ), LFUNCVAL ( net_server_delete ) },
-  { LSTRKEY( "__gc" ), LFUNCVAL ( net_server_delete ) },
-#if LUA_OPTIMIZE_MEMORY > 0
-  { LSTRKEY( "__index" ), LROVAL ( net_server_map ) },
-#endif
+static const LUA_REG_TYPE net_server_map[] = {
+  { LSTRKEY( "listen" ),  LFUNCVAL( net_server_listen ) },
+  { LSTRKEY( "close" ),   LFUNCVAL( net_server_close ) },
+  { LSTRKEY( "on" ),      LFUNCVAL( net_udpserver_on ) },
+  { LSTRKEY( "send" ),    LFUNCVAL( net_udpserver_send ) },
+//{ LSTRKEY( "delete" ),  LFUNCVAL( net_server_delete ) },
+  { LSTRKEY( "__gc" ),    LFUNCVAL( net_server_delete ) },
+  { LSTRKEY( "__index" ), LROVAL( net_server_map ) },
   { LNILKEY, LNILVAL }
 };
 
-static const LUA_REG_TYPE net_socket_map[] =
-{
+static const LUA_REG_TYPE net_socket_map[] = {
   { LSTRKEY( "connect" ), LFUNCVAL( net_socket_connect ) },
-  { LSTRKEY( "close" ), LFUNCVAL ( net_socket_close ) },
-  { LSTRKEY( "on" ), LFUNCVAL ( net_socket_on ) },
-  { LSTRKEY( "send" ), LFUNCVAL ( net_socket_send ) },
-  { LSTRKEY( "hold" ), LFUNCVAL ( net_socket_hold ) },
-  { LSTRKEY( "unhold" ), LFUNCVAL ( net_socket_unhold ) },
-  { LSTRKEY( "dns" ), LFUNCVAL ( net_socket_dns ) },
-  { LSTRKEY( "getpeer" ), LFUNCVAL ( net_socket_getpeer ) },
-  // { LSTRKEY( "delete" ), LFUNCVAL ( net_socket_delete ) },
-  { LSTRKEY( "__gc" ), LFUNCVAL ( net_socket_delete ) },
-#if LUA_OPTIMIZE_MEMORY > 0
-  { LSTRKEY( "__index" ), LROVAL ( net_socket_map ) },
-#endif
+  { LSTRKEY( "close" ),   LFUNCVAL( net_socket_close ) },
+  { LSTRKEY( "on" ),      LFUNCVAL( net_socket_on ) },
+  { LSTRKEY( "send" ),    LFUNCVAL( net_socket_send ) },
+  { LSTRKEY( "hold" ),    LFUNCVAL( net_socket_hold ) },
+  { LSTRKEY( "unhold" ),  LFUNCVAL( net_socket_unhold ) },
+  { LSTRKEY( "dns" ),     LFUNCVAL( net_socket_dns ) },
+  { LSTRKEY( "getpeer" ), LFUNCVAL( net_socket_getpeer ) },
+//{ LSTRKEY( "delete" ),  LFUNCVAL( net_socket_delete ) },
+  { LSTRKEY( "__gc" ),    LFUNCVAL( net_socket_delete ) },
+  { LSTRKEY( "__index" ), LROVAL( net_socket_map ) },
   { LNILKEY, LNILVAL }
 };
 #if 0
-static const LUA_REG_TYPE net_array_map[] =
-{
-  { LSTRKEY( "__index" ), LFUNCVAL( net_array_index ) },
+static const LUA_REG_TYPE net_array_map[] = {
+  { LSTRKEY( "__index" ),    LFUNCVAL( net_array_index ) },
   { LSTRKEY( "__newindex" ), LFUNCVAL( net_array_newindex ) },
   { LNILKEY, LNILVAL }
 };
 #endif
 
-static const LUA_REG_TYPE net_dns_map[] =
-{
-  { LSTRKEY( "setdnsserver" ), LFUNCVAL ( net_setdnsserver ) },  
-  { LSTRKEY( "getdnsserver" ), LFUNCVAL ( net_getdnsserver ) }, 
-  { LSTRKEY( "resolve" ), LFUNCVAL ( net_dns_static ) },  
-  { LNILKEY, LNILVAL }
-};
-
-const LUA_REG_TYPE net_map[] = 
-{
-  { LSTRKEY( "createServer" ), LFUNCVAL ( net_createServer ) },
-  { LSTRKEY( "createConnection" ), LFUNCVAL ( net_createConnection ) },
-  { LSTRKEY( "multicastJoin"), LFUNCVAL( net_multicastJoin ) },
-  { LSTRKEY( "multicastLeave"), LFUNCVAL( net_multicastLeave ) },
-#if LUA_OPTIMIZE_MEMORY > 0
-  { LSTRKEY( "dns" ), LROVAL( net_dns_map ) },
-  { LSTRKEY( "TCP" ), LNUMVAL( TCP ) },
-  { LSTRKEY( "UDP" ), LNUMVAL( UDP ) },
-
-  { LSTRKEY( "__metatable" ), LROVAL( net_map ) },
+static const LUA_REG_TYPE net_cert_map[] = {
+  { LSTRKEY( "verify" ), 	LFUNCVAL( net_cert_verify ) },  
+#ifdef CLIENT_SSL_CERT_AUTH_ENABLE
+  { LSTRKEY( "auth" ),		LFUNCVAL( net_cert_auth ) }, 
 #endif
   { LNILKEY, LNILVAL }
 };
 
-LUALIB_API int luaopen_net( lua_State *L )
-{
+static const LUA_REG_TYPE net_dns_map[] = {
+  { LSTRKEY( "setdnsserver" ), LFUNCVAL( net_setdnsserver ) },  
+  { LSTRKEY( "getdnsserver" ), LFUNCVAL( net_getdnsserver ) }, 
+  { LSTRKEY( "resolve" ),      LFUNCVAL( net_dns_static ) },  
+  { LNILKEY, LNILVAL }
+};
+
+static const LUA_REG_TYPE net_map[] = {
+  { LSTRKEY( "createServer" ),     LFUNCVAL( net_createServer ) },
+  { LSTRKEY( "createConnection" ), LFUNCVAL( net_createConnection ) },
+  { LSTRKEY( "multicastJoin"),     LFUNCVAL( net_multicastJoin ) },
+  { LSTRKEY( "multicastLeave"),    LFUNCVAL( net_multicastLeave ) },
+  { LSTRKEY( "dns" ),              LROVAL( net_dns_map ) },
+#ifdef CLIENT_SSL_ENABLE
+  { LSTRKEY( "cert" ),             LROVAL(net_cert_map) },
+#endif
+  { LSTRKEY( "TCP" ),              LNUMVAL( TCP ) },
+  { LSTRKEY( "UDP" ),              LNUMVAL( UDP ) },
+  { LSTRKEY( "__metatable" ),      LROVAL( net_map ) },
+  { LNILKEY, LNILVAL }
+};
+
+int luaopen_net( lua_State *L ) {
   int i;
   for(i=0;i<MAX_SOCKET;i++)
   {
     socket[i] = LUA_NOREF;
   }
 
-#if LUA_OPTIMIZE_MEMORY > 0
   luaL_rometatable(L, "net.server", (void *)net_server_map);  // create metatable for net.server
   luaL_rometatable(L, "net.socket", (void *)net_socket_map);  // create metatable for net.socket
   #if 0
-  luaL_rometatable(L, "net.array", (void *)net_array_map);  // create metatable for net.array
+  luaL_rometatable(L, "net.array", (void *)net_array_map);    // create metatable for net.array
   #endif
+
   return 0;
-#else // #if LUA_OPTIMIZE_MEMORY > 0
-  int n;
-  luaL_register( L, AUXLIB_NET, net_map );
-
-  // Set it as its own metatable
-  lua_pushvalue( L, -1 );
-  lua_setmetatable( L, -2 );
-
-  // Module constants  
-  MOD_REG_NUMBER( L, "TCP", TCP );
-  MOD_REG_NUMBER( L, "UDP", UDP );
-  
-  n = lua_gettop(L);
-
-  // create metatable
-  luaL_newmetatable(L, "net.server");
-  // metatable.__index = metatable
-  lua_pushliteral(L, "__index");
-  lua_pushvalue(L,-2);
-  lua_rawset(L,-3);
-  // Setup the methods inside metatable
-  luaL_register( L, NULL, net_server_map );
-
-  lua_settop(L, n);
-  // create metatable
-  luaL_newmetatable(L, "net.socket");
-  // metatable.__index = metatable
-  lua_pushliteral(L, "__index");
-  lua_pushvalue(L,-2);
-  lua_rawset(L,-3);
-  // Setup the methods inside metatable
-  luaL_register( L, NULL, net_socket_map );
-#if 0
-  lua_settop(L, n);
-  // create metatable
-  luaL_newmetatable(L, "net.array");
-  // Setup the methods inside metatable
-  luaL_register( L, NULL, net_array_map );
-#endif
-
-  lua_settop(L, n);
-  lua_newtable( L );
-  luaL_register( L, NULL, net_dns_map );
-  lua_setfield( L, -2, "dns" );
-
-  return 1;
-#endif // #if LUA_OPTIMIZE_MEMORY > 0  
 }
+
+NODEMCU_MODULE(NET, "net", net_map, luaopen_net);

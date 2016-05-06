@@ -1,8 +1,6 @@
-#include "lualib.h"
+#include "module.h"
 #include "lauxlib.h"
 #include "platform.h"
-#include "auxmods.h"
-#include "lrotable.h"
 #include "c_stdlib.h"
 #include "c_string.h"
 
@@ -45,7 +43,7 @@ static void ws2801_strip(uint8_t const * data, uint16_t len) {
     GPIO_REG_WRITE(GPIO_OUT_W1TC_ADDRESS, ws2801_bit_data);
 }
 
-static void enable_pin_mux(pin) {
+static void enable_pin_mux(int pin) {
     // The API only supports setting PERIPHS_IO_MUX on GPIO 0, 2, 4, 5
     switch (pin) {
     case 0:
@@ -124,17 +122,11 @@ static int ICACHE_FLASH_ATTR ws2801_writergb(lua_State* L) {
     return 0;
 }
 
-#define MIN_OPT_LEVEL 2
-#include "lrodefs.h"
-const LUA_REG_TYPE ws2801_map[] =
+static const LUA_REG_TYPE ws2801_map[] =
 {
     { LSTRKEY( "write" ), LFUNCVAL( ws2801_writergb )},
     { LSTRKEY( "init" ), LFUNCVAL( ws2801_init_lua )},
     { LNILKEY, LNILVAL}
 };
 
-LUALIB_API int luaopen_ws2801(lua_State *L) {
-    LREGISTER(L, "ws2801", ws2801_map);
-    return 1;
-}
-
+NODEMCU_MODULE(WS2801, "ws2801", ws2801_map, NULL);

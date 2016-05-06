@@ -25,23 +25,24 @@ SUBDIRS= 					\
 	user 					\
 	driver 					\
 	json 					\
-	upgrade 				\
 	platform 				\
 	libc 					\
 	lua 					\
 	lwip 					\
 	coap 					\
 	mqtt 					\
+	task 					\
 	u8glib 					\
 	ucglib					\
 	smart 					\
-	wofs 					\
 	modules 				\
 	spiffs 					\
 	cjson 					\
 	crypto 					\
 	dhtlib					\
-	tsl2561
+	tsl2561					\
+	net					\
+	http
 
 endif # } PDIR
 
@@ -70,8 +71,8 @@ COMPONENTS_eagle.app.v6 = 			\
 	user/libuser.a 				\
 	driver/libdriver.a 			\
 	json/libjson.a 				\
-	upgrade/libupgrade.a 			\
 	platform/libplatform.a 			\
+	task/libtask.a 				\
 	libc/liblibc.a 				\
 	lua/liblua.a 				\
 	lwip/liblwip.a 				\
@@ -80,14 +81,20 @@ COMPONENTS_eagle.app.v6 = 			\
 	u8glib/u8glib.a 			\
 	ucglib/ucglib.a 			\
 	smart/smart.a 				\
-	wofs/wofs.a 				\
 	spiffs/spiffs.a 			\
 	cjson/libcjson.a 			\
 	crypto/libcrypto.a 			\
 	dhtlib/libdhtlib.a 			\
 	tsl2561/tsl2561lib.a			\
-	modules/libmodules.a		
+	http/libhttp.a				\
+	net/libnodemcu_net.a			\
+	modules/libmodules.a			\
 
+# Inspect the modules library and work out which modules need to be linked.
+# For each enabled module, a symbol name of the form XYZ_module_selected is
+# returned. At link time those names are declared undefined, so those (and
+# only those) modules are pulled in.
+SELECTED_MODULE_SYMS=$(filter %_module_selected %module_selected1,$(shell $(NM) modules/.output/$(TARGET)/$(FLAVOR)/lib/libmodules.a))
 
 LINKFLAGS_eagle.app.v6 = 			\
 	-Wl,--gc-sections 			\
@@ -98,6 +105,7 @@ LINKFLAGS_eagle.app.v6 = 			\
 	-Wl,--no-check-sections 		\
 	-Wl,--wrap=_xtos_set_exception_handler	\
 	-Wl,-static 				\
+	$(addprefix -u , $(SELECTED_MODULE_SYMS)) \
 	-Wl,--start-group 			\
 	-lc 					\
 	-lgcc 					\
@@ -106,10 +114,12 @@ LINKFLAGS_eagle.app.v6 = 			\
 	-lpp 					\
 	-lnet80211 				\
 	-lwpa 					\
+	-lwpa2					\
 	-lmain 					\
 	-ljson 					\
 	-lsmartconfig 				\
 	-lssl 					\
+	-lcrypto				\
 	$(DEP_LIBS_eagle.app.v6) 		\
 	-Wl,--end-group 			\
 	-lm
@@ -134,9 +144,11 @@ DEPENDS_eagle.app.v6 = 				\
 #	-DWLAN_CONFIG_CCX
 CONFIGURATION_DEFINES =	-D__ets__ 		\
 			-DICACHE_FLASH 		\
+			-DLUA_OPTIMIZE_MEMORY=2	\
+			-DMIN_OPT_LEVEL=2	\
 			-DLWIP_OPEN_SRC 	\
 			-DPBUF_RSV_FOR_WLAN 	\
-			-DEBUF_LWIP
+			-DEBUF_LWIP		\
 
 DEFINES += 					\
 	$(UNIVERSAL_TARGET_DEFINES) 		\

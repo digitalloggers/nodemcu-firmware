@@ -4,8 +4,6 @@
 #include "user_config.h"
 #include "cpu_esp8266.h"
 
-#define FLASH_ADDRESS_START_MAP (INTERNAL_FLASH_START_ADDRESS)
-
 #define FLASH_SIZE_2MBIT    (2   * 1024 * 1024)
 #define FLASH_SIZE_4MBIT    (4   * 1024 * 1024)
 #define FLASH_SIZE_8MBIT    (8   * 1024 * 1024)
@@ -80,12 +78,12 @@ typedef struct
         SIZE_8MBIT = 2,
         SIZE_16MBIT = 3,
         SIZE_32MBIT = 4,
-        SIZE_64MBIT = 5,
-        SIZE_128MBIT = 6,
+        SIZE_16MBIT_8M_8M = 5,
+        SIZE_32MBIT_8M_8M = 6,
     } size : 4;
     uint32_t entry_point;
     uint32_t memory_offset;
-    uint32_t segment_size; 
+    uint32_t segment_size;
 } ICACHE_STORE_TYPEDEF_ATTR SPIFlashInfo;
 
 uint32_t flash_detect_size_byte(void);
@@ -105,7 +103,6 @@ uint32_t flash_rom_get_speed(void);
 bool flash_init_data_written(void);
 bool flash_init_data_default(void);
 bool flash_init_data_blank(void);
-bool flash_self_destruct(void);
 uint8_t byte_of_aligned_array(const uint8_t* aligned_array, uint32_t index);
 uint16_t word_of_aligned_array(const uint16_t *aligned_array, uint32_t index);
 // uint8_t flash_rom_get_checksum(void);

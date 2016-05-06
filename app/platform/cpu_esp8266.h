@@ -41,19 +41,13 @@
 #define SYS_PARAM_SEC_NUM 4
 #define SYS_PARAM_SEC_START (FLASH_SEC_NUM - SYS_PARAM_SEC_NUM)
 
-// #define WOFS_SEC_START	0x80
-// #define WOFS_SEC_START	0x60
-// #define WOFS_SEC_END	(SYS_PARAM_SEC_START)
-// #define WOFS_SEC_NUM	(WOFS_SEC_END - WOFS_SEC_START)
-// #define WOFS_SEC_NUM 0xc
-
 #define INTERNAL_FLASH_SECTOR_SIZE      SPI_FLASH_SEC_SIZE
 // #define INTERNAL_FLASH_SECTOR_ARRAY     { 0x4000, 0x4000, 0x4000, 0x4000, 0x10000, 0x20000, 0x20000, 0x20000, 0x20000, 0x20000 }
 #define INTERNAL_FLASH_WRITE_UNIT_SIZE  4
 #define INTERNAL_FLASH_READ_UNIT_SIZE	4
 
 #define INTERNAL_FLASH_SIZE             ( (SYS_PARAM_SEC_START) * INTERNAL_FLASH_SECTOR_SIZE )
-#define INTERNAL_FLASH_START_ADDRESS    0x40200000
+#define INTERNAL_FLASH_MAPPED_ADDRESS    0x40200000
 
 // SpiFlashOpResult spi_flash_erase_sector(uint16 sec);
 // SpiFlashOpResult spi_flash_write(uint32 des_addr, uint32 *src_addr, uint32 size);
@@ -67,5 +61,10 @@
 #define flash_erase spi_flash_erase_sector
 #define flash_read spi_flash_read
 #endif // defined(FLASH_SAFE_API)
+
+#define CACHE_FLASH_CTRL_REG         0x3ff0000c
+#define CACHE_FLASH_ACTIVE           0x00000100
+#define CACHE_FLASH_MAPPED0          0x02000000
+#define CACHE_FLASH_MAPPED1          0x00010000
 
 #endif // #ifndef __CPU_ESP8266_H__
